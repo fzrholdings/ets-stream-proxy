@@ -1,6 +1,5 @@
-// main.ts
 Deno.serve({ port: 8000 }, async (req) => {
-  // Allow CORS for your Google Site
+  // Handle CORS preflight (OPTIONS request)
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -14,14 +13,16 @@ Deno.serve({ port: 8000 }, async (req) => {
   }
 
   const STREAM_URL = "http://176.227.215.27:5539/stream";
+
+  // Abort the upstream fetch if it takes longer than 15 seconds to respond
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const response = await fetch(STREAM_URL, {
+    const upstream = await fetch(STREAM_URL, {
       headers: {
         "User-Agent": "Mozilla/5.0",
-        "Icy-MetaData": "1", // Required for Icecast metadata
+        "Icy-MetaData": "1",
         "Accept": "*/*",
       },
       signal: controller.signal,
@@ -29,29 +30,28 @@ Deno.serve({ port: 8000 }, async (req) => {
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`Upstream error: ${response.status}`);
+    if (!upstream.ok) {
+      throw new Error(`Upstream responded with ${upstream.status}`);
     }
 
-    // Headers required for proper audio streaming
+    // Force proper audio streaming headers
     const headers = new Headers({
       "Content-Type": "audio/mpeg",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Expose-Headers": "Content-Type, Icy-Br, Icy-Genre, Icy-Name",
-      "Cache-Control": "no-cache, no-store",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
       "Connection": "keep-alive",
-      "Transfer-Encoding": "chunked", // Force chunked transfer
+      "Transfer-Encoding": "chunked",
     });
 
-    // Copy any existing headers from the upstream
-    if (response.headers.has("Icy-Br")) headers.set("Icy-Br", response.headers.get("Icy-Br"));
-    if (response.headers.has("Icy-Name")) headers.set("Icy-Name", response.headers.get("Icy-Name"));
-
-    return new Response(response.body, { headers });
-  } catch (error) {
-    console.error("Proxy error:", error);
-    if (error.name === "AbortError") {
-      return new Response("Stream timeout", { status: 504 });
+    // Return the response body as a stream
+    return new Response(upstream.body, {
+      status: 200,
+      headers,
+    });
+  } catch (err) {
+    console.error("Proxy error:", err);
+    if (err.name === "AbortError") {
+      return new Response("Stream timeout (upstream slow)", { status: 504 });
     }
     return new Response("Stream unavailable", { status: 500 });
   }
