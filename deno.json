@@ -2,8 +2,9 @@
   "tasks": {
     "start": "deno run --allow-net --allow-env main.ts"
   },
-  "imports": {},
   "compilerOptions": {
-    "allowJs": true
-  }
+    "allowJs": true,
+    "strict": true
+  },
+  "imports": {}
 }
